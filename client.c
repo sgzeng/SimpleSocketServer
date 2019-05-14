@@ -16,95 +16,83 @@
 #define MAX_LINE 2048
 const char* IP = "127.0.0.1";
 
-int max(int a , int b)
+void appendBuffer(void* dst, void* src, int size, int* index)
 {
-	return a > b ? a : b;
+    int current = *index;
+    memcpy(dst + current, src, size);
+    *index = current + size;
 }
 
-/*readline函数实现*/
-ssize_t readline(int fd, char *vptr, size_t maxlen)
+int makeRequestMsg(void* clnt_buf)
 {
-	ssize_t	n, rc;
-	char	c, *ptr;
-
-	ptr = vptr;
-	for (n = 1; n < maxlen; n++) {
-		if ( (rc = read(fd, &c,1)) == 1) {
-			*ptr++ = c;
-			if (c == '\n')
-				break;	/* newline is stored, like fgets() */
-		} else if (rc == 0) {
-			*ptr = 0;
-			return(n - 1);	/* EOF, n - 1 bytes were read */
-		} else
-			return(-1);		/* error, errno set by read() */
-	}
-
-	*ptr = 0;	/* null terminate like fgets() */
-	return(n);
+    char opcode = 0x02;
+    int inputlen = 5;
+    char input[] = {0x0, 0x1, 0x2, 0x3, 0x4};
+    int offsetSize = 3;
+    int blocked_offset[] = {0, 1, 2};
+    // length = 1 + 4 + 5 + 4 + 3*4 = 
+    int length = sizeof(opcode) + sizeof(inputlen) + sizeof(input) + sizeof(offsetSize) + sizeof(blocked_offset);
+    int index = 0;
+    appendBuffer(clnt_buf, &length, sizeof(length), &index);
+    appendBuffer(clnt_buf, &opcode, sizeof(opcode), &index);
+    appendBuffer(clnt_buf, &inputlen, sizeof(inputlen), &index);
+    appendBuffer(clnt_buf, input, sizeof(input), &index);
+    appendBuffer(clnt_buf, &offsetSize, sizeof(offsetSize), &index);
+    appendBuffer(clnt_buf, blocked_offset, sizeof(blocked_offset), &index);
+    return length;
 }
 
-int makeRequestMsg(char* clnt_buf)
+void printBuffer(void * buffer, size_t len)
 {
-    memset(clnt_buf, 0xAA, length);
+    for(int i=0; i<len; i++){
+        printf("%x", *(char *)(buffer+i));
+    }
+    printf("\n");
 }
 
-/*普通客户端消息处理函数*/
+/* msg handling */
 void str_cli(int sockfd)
 {
-	/*发送和接收缓冲区*/
+	/*send or recieve*/
 	char sendline[MAX_LINE] , recvline[MAX_LINE], command[5];
 	while(fgets(command , 5 , stdin) != NULL)	
 	{
-        if(strncmp(command, "send", 4) || makeRequestMsg(sendline)){
-            bzero(sendline , MAX_LINE);
+        if(strncmp(command, "send", 4)){
+            bzero(command , 5);
             continue;
         }
-		write(sockfd , sendline , strlen(sendline));
-
-		bzero(recvline , MAX_LINE);
-		if(readline(sockfd , recvline , MAX_LINE) == 0)
-		{
-			perror("server terminated prematurely");
-			exit(1);
-		}//if
-
-		if(fputs(recvline , stdout) == EOF)
-		{
-			perror("fputs error");
-			exit(1);
-		}//if
+        int len = makeRequestMsg(sendline);
+		write(sockfd , sendline , len + sizeof(int));
+        read(sockfd, recvline, 13);
+        printBuffer(recvline, 13);
 		bzero(sendline , MAX_LINE);
-	}//while
+        bzero(recvline , MAX_LINE);
+        bzero(command , 5);
+	}
 }
 
 int main(int argc , char **argv)
 {
-	/*声明套接字和链接服务器地址*/
     int sockfd;
     struct sockaddr_in servaddr;
 
-    /*(1) 创建套接字*/
     if((sockfd = socket(AF_INET , SOCK_STREAM , 0)) == -1)
     {
         perror("socket error");
         exit(1);
-    }//if
+    }
 
-    /*(2) 设置链接服务器地址结构*/
     bzero(&servaddr , sizeof(servaddr));
     servaddr.sin_family = AF_INET;
     servaddr.sin_port = htons(PORT);
     servaddr.sin_addr.s_addr = inet_addr(IP);
 
-    /*(3) 发送链接服务器请求*/
     if(connect(sockfd , (struct sockaddr *)&servaddr , sizeof(servaddr)) < 0)
     {
         perror("connect error");
         exit(1);
-    }//if
+    }
 
-	/*调用消息处理函数*/
 	str_cli(sockfd);	
 	exit(0);
 }
